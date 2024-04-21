@@ -21,15 +21,10 @@ pub const Json = union(enum) {
     array: *std.ArrayList(*Json),
     /// Json bool values are named boolean instead since bool is a Zig type.
     boolean: bool,
+    null: void,
 
-    /// std.HashMap with K: ArrayList(u8) V: \*Json.
     pub fn Object() type {
-        return std.HashMap(
-            std.ArrayList(u8),
-            *Json,
-            ArrayListU8HashContext,
-            std.hash_map.default_max_load_percentage,
-        );
+        return std.StringHashMap(*Json);
     }
 };
 
@@ -116,7 +111,7 @@ pub const JsonAccess = struct {
                 .object => |obj| {
                     switch (key) {
                         .object_key => |k| {
-                            if (obj.get(k)) |*value| {
+                            if (obj.get(k.items)) |*value| {
                                 current = value.*;
                             } else {
                                 return JsonAccessError.NoSuchField;
@@ -176,16 +171,25 @@ pub const JsonAccess = struct {
     }
 };
 
+const CharacterIteratorError = error{NoCurrentYet};
 const CharacterIterator = struct {
     slice: []const u8,
     i: usize,
 
     fn new(slice: []const u8) CharacterIterator {
-        return CharacterIterator{ .slice = slice, .current = 0 };
+        return CharacterIterator{ .slice = slice, .i = 0 };
     }
 
-    fn current(self: *CharacterIterator) ?u8 {
-        return self.slice[self.i];
+    fn current(self: *CharacterIterator) CharacterIteratorError!?u8 {
+        if (self.i == 0) {
+            return CharacterIteratorError.NoCurrentYet;
+        }
+
+        if (self.i - 1 == self.slice.len) {
+            return null;
+        }
+
+        return self.slice[self.i - 1];
     }
 
     fn next(self: *CharacterIterator) ?u8 {
@@ -195,20 +199,22 @@ const CharacterIterator = struct {
             return value;
         }
 
+        self.i = self.slice.len + 1;
         return null;
     }
 };
 
-const JsonDecodeError = error{ InvalidFormat, NotImplementedYet };
+const JsonDecodeError = error{ InvalidFormat, NotImplementedYet, OutOfMemory };
 
-pub fn decode_json(data: []const u8, allocator: std.mem.Allocator) JsonDecodeError!void {
+pub fn decode_json(data: []const u8, allocator: std.mem.Allocator) JsonDecodeError!*Json {
     var iter = CharacterIterator.new(data);
-    const result = JsonDecoderUnmanaged.parse_value(&iter, allocator);
-    _ = result;
+    const result = try JsonDecoderUnmanaged.parse_value(&iter, allocator);
 
-    if (iter.current() != null) {
-        JsonDecodeError.InvalidFormat;
+    if (iter.next() != null) {
+        return JsonDecodeError.InvalidFormat;
     }
+
+    return result;
 }
 
 const JsonDecoderUnmanaged = struct {
@@ -222,55 +228,72 @@ const JsonDecoderUnmanaged = struct {
     }
 
     fn consume_whitespace(iter: *CharacterIterator) void {
+        var c = iter.current() catch iter.next();
         while (true) {
-            const c = iter.next();
-
             if (c == null or !is_whitespace(c.?)) {
                 break;
             }
+            c = iter.next();
         }
     }
 
     fn parse_value(iter: *CharacterIterator, allocator: std.mem.Allocator) JsonDecodeError!*Json {
         consume_whitespace(iter);
 
-        const first_non_whitespace = iter.current();
+        const first_non_whitespace = iter.current() catch unreachable;
         if (first_non_whitespace == null) {
             return JsonDecodeError.InvalidFormat;
         }
 
-        const value: ?Json = switch (first_non_whitespace.?) {
-            '{' => {
-                Json{ .object = try parse_object(iter, allocator) };
-            },
-            '[' => {
-                Json{ .array = try parse_array(iter, allocator) };
-            },
-            '"' => {
-                Json{ .string = try parse_string(iter, allocator) };
-            },
-            't' => {
-                confirm(iter, "true");
-                Json{ .boolean = true };
-            },
-            'f' => {
-                confirm(iter, "false");
-                Json{ .boolean = false };
-            },
-            'n' => {
-                confirm(iter, "null");
-                null;
-            },
-            else => {
-                Json{ .number = try parse_number(iter) };
-            },
+        var value: Json = val: {
+            switch (first_non_whitespace.?) {
+                '{' => {
+                    std.debug.print("object\n", .{});
+                    break :val Json{ .object = try parse_object(iter, allocator) };
+                },
+                '[' => {
+                    std.debug.print("array\n", .{});
+                    break :val Json{ .array = try parse_array(iter, allocator) };
+                },
+                '"' => {
+                    std.debug.print("string\n", .{});
+                    break :val Json{ .string = try parse_string(iter, allocator) };
+                },
+                't' => {
+                    std.debug.print("boolean\n", .{});
+                    try confirm(iter, "true");
+                    break :val Json{ .boolean = true };
+                },
+                'f' => {
+                    std.debug.print("boolean\n", .{});
+                    try confirm(iter, "false");
+                    break :val Json{ .boolean = false };
+                },
+                'n' => {
+                    std.debug.print("null\n", .{});
+                    try confirm(iter, "null");
+                    break :val Json{ .null = {} };
+                },
+                else => {
+                    break :val Json{ .number = try parse_number(iter, allocator) };
+                },
+            }
         };
+
         consume_whitespace(iter);
-        return value;
+
+        switch (value) {
+            .array => |a| {
+                std.debug.print("{d}\n", .{a.items.len});
+            },
+            else => {},
+        }
+
+        return &value;
     }
 
-    fn parse_string(iter: *CharacterIterator, allocator: std.mem.Allocator) std.ArrayList(u8) {
-        const start = iter.current();
+    fn parse_string(iter: *CharacterIterator, allocator: std.mem.Allocator) JsonDecodeError!*std.ArrayList(u8) {
+        const start = iter.current() catch unreachable;
         if (start == null or start.? != '"') {
             return JsonDecodeError.InvalidFormat;
         }
@@ -283,36 +306,47 @@ const JsonDecoderUnmanaged = struct {
                     break;
                 }
 
-                string.append(c);
+                try string.append(c);
             } else {
                 return JsonDecodeError.InvalidFormat;
             }
         }
 
-        return string;
+        _ = iter.next();
+        return &string;
     }
 
-    fn parse_number(iter: *CharacterIterator) JsonDecodeError!f64 {
-        _ = iter;
+    fn parse_number(iter: *CharacterIterator, allocator: std.mem.Allocator) JsonDecodeError!f64 {
+        var string = std.ArrayList(u8).init(allocator);
 
-        // TODO
+        var c: ?u8 = iter.current() catch unreachable;
+        while (c != null and (('0' <= c.? and c.? <= '9') or c.? == '+' or c.? == '-' or c.? == 'e' or c.? == 'E' or c.? == '.')) {
+            try string.append(c.?);
+            c = iter.next();
+        }
 
-        return JsonDecodeError.NotImplementedYet;
+        std.debug.print("number: {s}\n", .{string.items});
+
+        const result: JsonDecodeError!f64 = std.fmt.parseFloat(f64, string.items) catch JsonDecodeError.InvalidFormat;
+        return result;
     }
 
     fn parse_object(iter: *CharacterIterator, allocator: std.mem.Allocator) JsonDecodeError!*Json.Object() {
-        const start = iter.current();
+        const start = iter.current() catch unreachable;
         if (start == null or start.? != '{') {
             return JsonDecodeError.InvalidFormat;
         }
+        _ = iter.next();
 
         var object = Json.Object().init(allocator);
 
         consume_whitespace(iter);
-        const first_non_whitespace = iter.current();
+        const first_non_whitespace = iter.current() catch unreachable;
         if (first_non_whitespace == null) {
             return JsonDecodeError.InvalidFormat;
         } else if (first_non_whitespace.? == '}') {
+            _ = iter.next();
+
             return &object;
         }
 
@@ -320,16 +354,18 @@ const JsonDecoderUnmanaged = struct {
             const key = try parse_string(iter, allocator);
 
             consume_whitespace(iter);
-            const key_value_separator = iter.current();
+            const key_value_separator = iter.current() catch unreachable;
             if (key_value_separator == null or key_value_separator.? != ':') {
                 return JsonDecodeError.InvalidFormat;
             }
+            _ = iter.next();
 
             const value = try parse_value(iter, allocator);
-            object.put(key, value);
+            try object.put(key.items, value);
 
-            if (iter.current()) |key_value_end| {
+            if (iter.current() catch unreachable) |key_value_end| {
                 if (key_value_end == '}') {
+                    _ = iter.next();
                     return &object;
                 } else if (key_value_end != ',') {
                     return JsonDecodeError.InvalidFormat;
@@ -337,33 +373,38 @@ const JsonDecoderUnmanaged = struct {
             } else {
                 return JsonDecodeError.InvalidFormat;
             }
+            _ = iter.next();
 
             consume_whitespace(iter);
         }
     }
 
     fn parse_array(iter: *CharacterIterator, allocator: std.mem.Allocator) JsonDecodeError!*std.ArrayList(*Json) {
-        const start = iter.current();
+        const start = iter.current() catch unreachable;
         if (start == null or start.? != '[') {
             return JsonDecodeError.InvalidFormat;
         }
+        _ = iter.next();
 
         var array = std.ArrayList(*Json).init(allocator);
 
         consume_whitespace(iter);
-        const first_non_whitespace = iter.current();
+        const first_non_whitespace = iter.current() catch unreachable;
         if (first_non_whitespace == null) {
             return JsonDecodeError.InvalidFormat;
-        } else if (first_non_whitespace.? == '}') {
+        } else if (first_non_whitespace.? == ']') {
+            _ = iter.next();
             return &array;
         }
 
         while (true) {
             const value = try parse_value(iter, allocator);
-            array.append(value);
 
-            if (iter.current()) |value_end| {
+            try array.append(value);
+
+            if (iter.current() catch unreachable) |value_end| {
                 if (value_end == ']') {
+                    _ = iter.next();
                     return &array;
                 } else if (value_end != ',') {
                     return JsonDecodeError.InvalidFormat;
@@ -371,13 +412,14 @@ const JsonDecoderUnmanaged = struct {
             } else {
                 return JsonDecodeError.InvalidFormat;
             }
+            _ = iter.next();
         }
     }
 
     /// Confirms whether the iterator's next values match the provided slice.
     /// It iterates over the slice while also taking the iterator's next character always and checks that they are equal.
     fn confirm(iter: *CharacterIterator, slice: []const u8) JsonDecodeError!void {
-        var c: ?u8 = iter.current();
+        var c: ?u8 = iter.current() catch unreachable;
         for (slice) |e| {
             if (c == null or e != c.?) {
                 return JsonDecodeError.InvalidFormat;

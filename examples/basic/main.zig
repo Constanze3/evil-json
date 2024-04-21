@@ -31,20 +31,11 @@ pub fn main() !void {
     const file_size = try file.getEndPos();
     const data = try file.readToEndAlloc(allocator, file_size);
 
-    _ = try json.decodeJson(data);
+    const parsed: *json.Json = try json.decode_json(data, allocator);
+    // var ja = json.JsonAccess.new(parsed, allocator);
 
-    // const u = Util{ .allocator = allocator };
+    // const res = try ja.o("gods").a(0).o("name").get_string();
 
-    // const j1 = json.Json{
-    //     .string = try u.string("very weak"),
-    // };
-
-    // var j2_object = json.Json.Object().init(allocator);
-    // try j2_object.put(try u.string("strength"), &j1);
-    // const j2 = json.Json{ .object = j2_object };
-
-    // var j = json.JsonAccess.new(&j2, allocator);
-
-    // const res = try j.o("strength").get_string();
-    // std.debug.print("{s}", .{res});
+    const stuff: *std.ArrayList(*json.Json) = parsed.object.get("gods").?.array;
+    std.debug.print("{d}\n", .{stuff.items.len});
 }
