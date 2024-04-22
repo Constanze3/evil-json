@@ -32,6 +32,7 @@ pub fn main() !void {
     const data = try file.readToEndAlloc(allocator, file_size);
 
     const parsed: *json.Json = try json.decode_json(data, allocator);
+
     // var ja = json.JsonAccess.new(parsed, allocator);
 
     // const res = try ja.o("gods").a(0).o("name").get_string();

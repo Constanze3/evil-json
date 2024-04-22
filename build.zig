@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) void {
     {
         const lib = b.addStaticLibrary(.{
             .name = "evil-json",
-            .root_source_file = .{ .path = "src/root.zig" },
+            .root_source_file = .{ .path = "src/root2.zig" },
             .target = target,
             .optimize = optimize,
         });
@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) void {
     // Test
     {
         const lib_unit_tests = b.addTest(.{
-            .root_source_file = .{ .path = "src/root.zig" },
+            .root_source_file = .{ .path = "src/root2.zig" },
             .target = target,
             .optimize = optimize,
         });
@@ -40,7 +40,7 @@ pub fn build(b: *std.Build) void {
 
     // Example
     {
-        const evil_json = b.addModule("evil-json", .{ .root_source_file = .{ .path = "src/root.zig" } });
+        const evil_json = b.addModule("evil-json", .{ .root_source_file = .{ .path = "src/root2.zig" } });
 
         const opt = b.option([]const u8, "example", "The example to build and run") orelse "basic";
         const example_file = res: {
