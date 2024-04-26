@@ -1,15 +1,5 @@
 const std = @import("std");
 
-// test "simple" {
-//     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-//     defer arena.deinit();
-//
-//     const allocator = arena.allocator();
-//
-//     const value = try decodeJson("{\"hello\": \"there\"}", allocator);
-//     try std.testing.expectEqualSlices(u8, "there", value.object.get("hello").?.string);
-// }
-
 pub const Value = union(enum) {
     string: []const u8,
     number: f64,
@@ -17,12 +7,91 @@ pub const Value = union(enum) {
     array: std.ArrayList(Value),
     bool: bool,
     null: void,
+
+    // TODO proper encoder later
+    pub fn print(self: @This()) void {
+        switch (self) {
+            .string => |val| {
+                std.debug.print("\"{s}\"", .{val});
+            },
+            .number => |val| {
+                std.debug.print("{d}", .{val});
+            },
+            .object => |val| {
+                std.debug.print("{{ ", .{});
+
+                var iter = val.iterator();
+                var entry = iter.next();
+                while (true) {
+                    std.debug.print("\"{s}\": ", .{entry.?.key_ptr.*});
+                    entry.?.value_ptr.print();
+
+                    entry = iter.next();
+                    if (entry == null) {
+                        break;
+                    } else {
+                        std.debug.print(", ", .{});
+                    }
+                }
+
+                std.debug.print(" }}", .{});
+            },
+            .array => |val| {
+                std.debug.print("[ ", .{});
+
+                for (val.items, 1..) |item, i| {
+                    item.print();
+
+                    if (i < val.items.len) {
+                        std.debug.print(", ", .{});
+                    }
+                }
+
+                std.debug.print(" ]", .{});
+            },
+            .bool => |val| {
+                std.debug.print("{any}", .{val});
+            },
+            .null => {
+                std.debug.print("null", .{});
+            },
+        }
+    }
 };
 
-// pub const Parsed = struct {
-//     value: Value,
-//     allocator: std.mem.Allocator,
-// };
+pub const Parsed = struct {
+    value: Value,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: @This()) void {
+        _ = self;
+        // TODO
+    }
+};
+
+test "decode json simple" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const allocator = arena.allocator();
+
+    const parsed = try decodeJson("{\"hello\": \"there\"}", allocator);
+    const value = parsed.value;
+
+    try std.testing.expectEqualSlices(u8, "there", value.object.get("hello").?.string);
+}
+
+const JsonDecodeError = error{ InvalidFormat, OutOfMemory };
+
+pub fn decodeJson(data: []const u8, allocator: std.mem.Allocator) JsonDecodeError!Parsed {
+    var stream = CharacterStream.init(data);
+    const value = try parseValue(&stream, allocator);
+
+    return Parsed{
+        .value = value,
+        .allocator = allocator,
+    };
+}
 
 test "character stream" {
     var stream = CharacterStream.init("apple");
@@ -57,15 +126,6 @@ const CharacterStream = struct {
     }
 };
 
-const JsonDecodeError = error{ InvalidFormat, OutOfMemory };
-
-pub fn decodeJson(data: []const u8, allocator: std.mem.Allocator) JsonDecodeError!Value {
-    _ = allocator;
-    _ = data;
-
-    return JsonDecodeError.InvalidFormat;
-}
-
 fn parseValue(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecodeError!Value {
     consumeWhitespace(stream);
     const first_non_whitespace = stream.current();
@@ -74,25 +134,19 @@ fn parseValue(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecode
         return JsonDecodeError.InvalidFormat;
     }
 
-    const value: Value =
-        switch (first_non_whitespace.?) {
+    const value: Value = switch (first_non_whitespace.?) {
         '{' => try parseObject(stream, allocator),
         '"' => try parseString(stream, allocator),
-        else => Value{ .null = {} },
+        '[' => try parseArray(stream, allocator),
+        't' => try parseTrue(stream),
+        'f' => try parseFalse(stream),
+        'n' => try parseNull(stream),
+        else => try parseNumber(stream, allocator),
     };
 
     consumeWhitespace(stream);
 
     return value;
-}
-
-fn isWhiteSpace(character: u8) bool {
-    for (" \n\r\t") |c| {
-        if (c == character) {
-            return true;
-        }
-    }
-    return false;
 }
 
 test "consume whitespace" {
@@ -109,18 +163,94 @@ fn consumeWhitespace(stream: *CharacterStream) void {
     }
 }
 
+fn isWhiteSpace(character: u8) bool {
+    for (" \n\r\t") |c| {
+        if (c == character) {
+            return true;
+        }
+    }
+    return false;
+}
+
+test "parse string" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var stream = CharacterStream.init("\"Who is this gentleman?\"");
+    const value = try parseString(&stream, allocator);
+    try std.testing.expectEqualStrings("Who is this gentleman?", value.string);
+}
+
+fn parseString(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecodeError!Value {
+    const start = stream.current();
+    if (start == null or start.? != '"') {
+        return JsonDecodeError.InvalidFormat;
+    }
+
+    var string = std.ArrayList(u8).init(allocator);
+
+    while (true) {
+        stream.progress();
+
+        if (stream.current()) |c| {
+            if (c == '"') {
+                stream.progress();
+                return Value{ .string = string.items };
+            }
+
+            try string.append(c);
+        } else {
+            return JsonDecodeError.InvalidFormat;
+        }
+    }
+}
+
+test "parse number" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var stream = CharacterStream.init("-1.1231E2");
+    const value = try parseNumber(&stream, allocator);
+    try std.testing.expectEqual(-1.1231e2, value.number);
+}
+
+fn parseNumber(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecodeError!Value {
+    var number_string = std.ArrayList(u8).init(allocator);
+    defer number_string.deinit();
+
+    var c: ?u8 = stream.current();
+    while (c != null and isJsonNumberCharacter(c.?)) {
+        try number_string.append(c.?);
+        stream.progress();
+        c = stream.current();
+    }
+
+    const number = std.fmt.parseFloat(f64, number_string.items) catch JsonDecodeError.InvalidFormat;
+    return Value{ .number = try number };
+}
+
+fn isJsonNumberCharacter(character: u8) bool {
+    return switch (character) {
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '-', 'e', 'E', '.' => true,
+        else => false,
+    };
+}
+
 test "parse object" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var stream = CharacterStream.init("{ \"name\": \"Sherlock Holmes\" }");
+    var stream = CharacterStream.init("{   \n     \"name\":      \"Sherlock Holmes\" \t  }");
     const value = try parseObject(&stream, allocator);
     try std.testing.expectEqualStrings("Sherlock Holmes", value.object.get("name").?.string);
 }
 
 fn parseObject(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecodeError!Value {
-    if (stream.current() == null or stream.current() != '{') {
+    const start = stream.current();
+    if (start == null or start.? != '{') {
         return JsonDecodeError.InvalidFormat;
     }
 
@@ -143,7 +273,8 @@ fn parseObject(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecod
 
         consumeWhitespace(stream);
 
-        if (stream.current() == null or stream.current().? != ':') {
+        const separator = stream.current();
+        if (separator == null or separator.? != ':') {
             return JsonDecodeError.InvalidFormat;
         }
         stream.progress();
@@ -172,35 +303,88 @@ fn parseObject(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecod
     }
 }
 
-test "parse string" {
+test "parse array" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var stream = CharacterStream.init("\"Who is this gentleman?\"");
-    const value = try parseString(&stream, allocator);
-    try std.testing.expectEqualStrings("Who is this gentleman?", value.string);
+    var stream = CharacterStream.init("[ \"this is not a number\",    \n\t    3.1415926535          ]");
+    const value = try parseArray(&stream, allocator);
+
+    try std.testing.expectEqualStrings("this is not a number", value.array.items[0].string);
+    try std.testing.expectEqual(3.1415926535, value.array.items[1].number);
 }
 
-fn parseString(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecodeError!Value {
-    if (stream.current() == null or stream.current() != '"') {
+fn parseArray(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecodeError!Value {
+    const start = stream.current();
+    if (start == null or start.? != '[') {
         return JsonDecodeError.InvalidFormat;
     }
 
-    var string = std.ArrayList(u8).init(allocator);
+    var array = std.ArrayList(Value).init(allocator);
+
+    stream.progress();
+    consumeWhitespace(stream);
+
+    if (stream.current()) |c| {
+        if (c == ']') {
+            stream.progress();
+            return Value{ .array = array };
+        }
+    } else {
+        return JsonDecodeError.InvalidFormat;
+    }
 
     while (true) {
-        stream.progress();
+        const value = try parseValue(stream, allocator);
 
-        if (stream.current()) |c| {
-            if (c == '"') {
-                stream.progress();
-                return Value{ .string = string.items };
+        try array.append(value);
+
+        if (stream.current()) |key_value_end| {
+            switch (key_value_end) {
+                ']' => {
+                    stream.progress();
+                    return Value{ .array = array };
+                },
+                ',' => {
+                    stream.progress();
+                },
+                else => {
+                    return JsonDecodeError.InvalidFormat;
+                },
             }
-
-            try string.append(c);
         } else {
             return JsonDecodeError.InvalidFormat;
         }
     }
+}
+
+test "consume and match" {
+    var stream = CharacterStream.init("true or false");
+    try consumeAndMatch(&stream, "true");
+}
+
+fn consumeAndMatch(stream: *CharacterStream, slice: []const u8) JsonDecodeError!void {
+    for (slice) |c2| {
+        const c1 = stream.current();
+        if (c1 == null or c1.? != c2) {
+            return JsonDecodeError.InvalidFormat;
+        }
+        stream.progress();
+    }
+}
+
+fn parseTrue(stream: *CharacterStream) JsonDecodeError!Value {
+    try consumeAndMatch(stream, "true");
+    return Value{ .bool = true };
+}
+
+fn parseFalse(stream: *CharacterStream) JsonDecodeError!Value {
+    try consumeAndMatch(stream, "false");
+    return Value{ .bool = false };
+}
+
+fn parseNull(stream: *CharacterStream) JsonDecodeError!Value {
+    try consumeAndMatch(stream, "null");
+    return Value{ .null = {} };
 }
