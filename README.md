@@ -9,4 +9,4 @@ State: Does work somewhat :)
 - Provide a nice and easy way to access values in a nested JSON Value
 - Provide JSON encoder with some customizations (pretty printing)
 
-\*: I am not planning to tailor this on any specific standard and I may ignore things like processing utf-8 etc.
+\*: I am not planning to tailor this to any specific standard and I may ignore things like processing utf-8 etc.
