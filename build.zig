@@ -1,22 +1,14 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
     // Static Library
     {
         const lib = b.addStaticLibrary(.{
             .name = "evil-json",
-            .root_source_file = .{ .path = "src/root2.zig" },
+            .root_source_file = .{ .path = "src/root.zig" },
             .target = target,
             .optimize = optimize,
         });
@@ -24,10 +16,10 @@ pub fn build(b: *std.Build) void {
         b.installArtifact(lib);
     }
 
-    // Test
+    // Tests
     {
         const lib_unit_tests = b.addTest(.{
-            .root_source_file = .{ .path = "src/root2.zig" },
+            .root_source_file = .{ .path = "src/root.zig" },
             .target = target,
             .optimize = optimize,
         });
@@ -38,10 +30,11 @@ pub fn build(b: *std.Build) void {
         test_step.dependOn(&run_lib_unit_tests.step);
     }
 
-    // Example
-    {
-        const evil_json = b.addModule("evil-json", .{ .root_source_file = .{ .path = "src/root2.zig" } });
+    // Modules
+    const lib_module = b.addModule("evil-json", .{ .root_source_file = .{ .path = "src/root.zig" } });
 
+    // Examples
+    {
         const opt = b.option([]const u8, "example", "The example to build and run") orelse "basic";
         const example_file = res: {
             if (std.mem.eql(u8, opt, "basic")) {
@@ -62,7 +55,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         });
 
-        example.root_module.addImport("evil-json", evil_json);
+        example.root_module.addImport("evil-json", lib_module);
 
         const run_example = b.addRunArtifact(example);
         run_example.step.dependOn(b.getInstallStep());

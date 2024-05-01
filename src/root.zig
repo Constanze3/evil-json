@@ -1,430 +1,400 @@
 const std = @import("std");
+const access = @import("access.zig");
 
-/// Hash context for std.ArrayList(u8)
-const ArrayListU8HashContext = struct {
-    pub fn hash(_: ArrayListU8HashContext, key: std.ArrayList(u8)) u64 {
-        var h = std.hash.Fnv1a_64.init();
-        h.update(key.items);
-        return h.final();
-    }
+pub const Access = access.JsonAccess;
 
-    pub fn eql(_: ArrayListU8HashContext, a: std.ArrayList(u8), b: std.ArrayList(u8)) bool {
-        return std.mem.eql(u8, a.items, b.items);
-    }
-};
-
-/// Data structure for Json values.
-pub const Json = union(enum) {
-    string: *std.ArrayList(u8),
-    number: f64,
-    object: *Object(),
-    array: *std.ArrayList(*Json),
-    /// Json bool values are named boolean instead since bool is a Zig type.
-    boolean: bool,
-    null: void,
-
-    pub fn Object() type {
-        return std.StringHashMap(*Json);
-    }
-};
-
-test "json model" {
-    // var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    // defer arena.deinit();
-
-    // const allocator = arena.allocator();
-
-    // const u = Util{ .allocator = allocator };
-
-    // const j1 = Json{
-    //     .string = try u.string("very weak"),
-    // };
-
-    // var j2_object = Json.Object().init(allocator);
-    // try j2_object.put(try u.string("strength"), &j1);
-    // const j2 = Json{ .object = j2_object };
-
-    // try std.testing.expectEqualStrings("very weak", j2.object.get(try u.string("strength")).?.string.items);
+test {
+    _ = @import("access.zig");
 }
 
-/// A key to access a child JSON value of a JSON value.
-pub const JsonAccessKey = union(enum) {
-    object_key: std.ArrayList(u8),
-    array_index: usize,
+pub const Object = std.StringHashMap(Value);
+pub const Array = std.ArrayList(Value);
+
+pub const Value = union(enum) {
+    string: []const u8,
+    number: f64,
+    object: Object,
+    array: Array,
+    bool: bool,
+    null: void,
+
+    // TODO proper encoder later
+    pub fn print(self: @This()) void {
+        switch (self) {
+            .string => |val| {
+                std.debug.print("\"{s}\"", .{val});
+            },
+            .number => |val| {
+                std.debug.print("{d}", .{val});
+            },
+            .object => |val| {
+                std.debug.print("{{ ", .{});
+
+                var iter = val.iterator();
+                var entry = iter.next();
+                while (true) {
+                    std.debug.print("\"{s}\": ", .{entry.?.key_ptr.*});
+                    entry.?.value_ptr.print();
+
+                    entry = iter.next();
+                    if (entry == null) {
+                        break;
+                    } else {
+                        std.debug.print(", ", .{});
+                    }
+                }
+
+                std.debug.print(" }}", .{});
+            },
+            .array => |val| {
+                std.debug.print("[ ", .{});
+
+                for (val.items, 1..) |item, i| {
+                    item.print();
+
+                    if (i < val.items.len) {
+                        std.debug.print(", ", .{});
+                    }
+                }
+
+                std.debug.print(" ]", .{});
+            },
+            .bool => |val| {
+                std.debug.print("{any}", .{val});
+            },
+            .null => {
+                std.debug.print("null", .{});
+            },
+        }
+    }
 };
 
-/// Error set in case evaluating a `JsonAccess` fails.
-pub const JsonAccessError = error{ InvalidKeyType, NoChildren, NoSuchField };
-
-/// Struct that provides an easy way to access child JSON values of a JSON value.
-pub const JsonAccess = struct {
+pub const Parsed = struct {
+    value: Value,
     allocator: std.mem.Allocator,
-    target: *Json,
-    key_sequence: std.ArrayList(JsonAccessKey),
 
-    pub fn new(target: *Json, allocator: std.mem.Allocator) JsonAccess {
-        return JsonAccess{
-            .allocator = allocator,
-            .target = target,
-            .key_sequence = std.ArrayList(JsonAccessKey).init(allocator),
-        };
-    }
-
-    /// Appends an object key to the access sequence.
-    /// Accepts anything that can coerce to `[]const u8` or an `std.ArrayList(u8)`.
-    pub fn o(self: *JsonAccess, key: anytype) *JsonAccess {
-        const access_key = parse_access_key: {
-            switch (@TypeOf(key)) {
-                std.ArrayList(u8) => {
-                    break :parse_access_key JsonAccessKey{ .object_key = key };
-                },
-                else => {
-                    var list = std.ArrayList(u8).init(self.allocator);
-                    list.appendSlice(@as([]const u8, key)) catch unreachable;
-                    break :parse_access_key JsonAccessKey{ .object_key = list };
-                },
-            }
-        };
-
-        return self.append(access_key);
-    }
-
-    /// Appends an array index to the access sequence.
-    /// Accepts anything that can coerce to `usize`.
-    pub fn a(self: *JsonAccess, index: anytype) *JsonAccess {
-        return self.append(JsonAccessKey{
-            .array_index = @as(usize, index),
-        });
-    }
-
-    /// Appends a JsonAccessKey to the access sequence.
-    pub fn append(self: *JsonAccess, key: JsonAccessKey) *JsonAccess {
-        self.key_sequence.append(key) catch unreachable;
-        return self;
-    }
-
-    /// Evaluates the access sequence.
-    pub fn get(self: *const JsonAccess) JsonAccessError!*Json {
-        var current: *Json = self.target;
-        for (self.key_sequence.items) |key| {
-            switch (current.*) {
-                .object => |obj| {
-                    switch (key) {
-                        .object_key => |k| {
-                            if (obj.get(k.items)) |*value| {
-                                current = value.*;
-                            } else {
-                                return JsonAccessError.NoSuchField;
-                            }
-                        },
-                        .array_index => return JsonAccessError.InvalidKeyType,
-                    }
-                },
-                .array => |arr| {
-                    switch (key) {
-                        .object_key => return JsonAccessError.InvalidKeyType,
-                        .array_index => |k| {
-                            current = arr.items[k];
-                        },
-                    }
-                },
-                inline else => return JsonAccessError.NoChildren,
-            }
-        }
-
-        return current;
-    }
-
-    /// Evaluates the access sequence and returns its string value.
-    /// It must be certain that the obtained value is a string, if it is not, switch on get() instead.
-    pub fn get_string(self: *const JsonAccess) JsonAccessError![]const u8 {
-        const val = try self.get();
-        return val.string.items;
-    }
-
-    /// Evaulates the access sequence and returns its number value.
-    /// It must be certain that the obtained value is a number, if it is not, switch on get() instead.
-    pub fn get_number(self: *const JsonAccess) JsonAccessError!f64 {
-        const val = try self.get();
-        return val.number;
-    }
-
-    /// Evaluates the access sequence and returns its object value.
-    /// It must be certain that the obtained value is an object, if it is not, switch on get() instead.
-    pub fn get_object(self: *const JsonAccess) JsonAccessError!*Json.Object() {
-        const val = try self.get();
-        return val.object;
-    }
-
-    /// Evaluates the access sequence and returns its array value.
-    /// It must be certain that the obtained value is an array, if it is not, switch on get() instead.
-    pub fn get_array(self: *const JsonAccess) JsonAccessError![]const *Json {
-        const val = try self.get();
-        return val.array.items;
-    }
-
-    /// Evaluates the access sequence and returns its boolean value.
-    /// It must be certain that the obtained value is a boolean, if it is not, switch on get() instead.
-    pub fn get_boolean(self: *const JsonAccess) JsonAccessError!bool {
-        const val = try self.get();
-        return val.boolean;
+    pub fn deinit(self: @This()) void {
+        _ = self;
+        // TODO
     }
 };
 
-const CharacterIteratorError = error{NoCurrentYet};
-const CharacterIterator = struct {
-    slice: []const u8,
-    i: usize,
+test "decode json simple" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
-    fn new(slice: []const u8) CharacterIterator {
-        return CharacterIterator{ .slice = slice, .i = 0 };
+    const allocator = arena.allocator();
+
+    const parsed = try decodeJson("{\"hello\": \"there\"}", allocator);
+    const value = parsed.value;
+
+    try std.testing.expectEqualSlices(u8, "there", value.object.get("hello").?.string);
+}
+
+const JsonDecodeError = error{ InvalidFormat, OutOfMemory };
+
+pub fn decodeJson(data: []const u8, allocator: std.mem.Allocator) JsonDecodeError!Parsed {
+    var stream = CharacterStream.init(data);
+    const value = try parseValue(&stream, allocator);
+
+    return Parsed{
+        .value = value,
+        .allocator = allocator,
+    };
+}
+
+test "character stream" {
+    var stream = CharacterStream.init("apple");
+    stream.progress();
+    stream.progress();
+
+    try std.testing.expectEqual('p', stream.current());
+}
+
+const CharacterStream = struct {
+    input: []const u8,
+    cursor: usize = 0,
+
+    fn init(input: []const u8) @This() {
+        return .{
+            .input = input,
+        };
     }
 
-    fn current(self: *CharacterIterator) CharacterIteratorError!?u8 {
-        if (self.i == 0) {
-            return CharacterIteratorError.NoCurrentYet;
+    fn progress(self: *@This()) void {
+        if (self.cursor < self.input.len) {
+            self.cursor += 1;
         }
+    }
 
-        if (self.i - 1 == self.slice.len) {
+    fn current(self: *const @This()) ?u8 {
+        if (self.cursor == self.input.len) {
             return null;
         }
 
-        return self.slice[self.i - 1];
-    }
-
-    fn next(self: *CharacterIterator) ?u8 {
-        if (self.i < self.slice.len) {
-            const value = self.slice[self.i];
-            self.i += 1;
-            return value;
-        }
-
-        self.i = self.slice.len + 1;
-        return null;
+        return self.input[self.cursor];
     }
 };
 
-const JsonDecodeError = error{ InvalidFormat, NotImplementedYet, OutOfMemory };
+fn parseValue(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecodeError!Value {
+    consumeWhitespace(stream);
+    const first_non_whitespace = stream.current();
 
-pub fn decode_json(data: []const u8, allocator: std.mem.Allocator) JsonDecodeError!*Json {
-    var iter = CharacterIterator.new(data);
-    const result = try JsonDecoderUnmanaged.parse_value(&iter, allocator);
-
-    if (iter.next() != null) {
+    if (first_non_whitespace == null) {
         return JsonDecodeError.InvalidFormat;
     }
 
-    return result;
+    const value: Value = switch (first_non_whitespace.?) {
+        '{' => try parseObject(stream, allocator),
+        '"' => try parseString(stream, allocator),
+        '[' => try parseArray(stream, allocator),
+        't' => try parseTrue(stream),
+        'f' => try parseFalse(stream),
+        'n' => try parseNull(stream),
+        else => try parseNumber(stream, allocator),
+    };
+
+    consumeWhitespace(stream);
+
+    return value;
 }
 
-const JsonDecoderUnmanaged = struct {
-    fn is_whitespace(character: u8) bool {
-        for (" \n\r\t") |c| {
-            if (c == character) {
-                return true;
-            }
+test "consume whitespace" {
+    var stream = CharacterStream.init(" \t\r\n\n\t\r\n   \n\n\t a \t \n");
+    consumeWhitespace(&stream);
+    try std.testing.expectEqual('a', stream.current().?);
+}
+
+fn consumeWhitespace(stream: *CharacterStream) void {
+    var c = stream.current();
+    while (c != null and isWhiteSpace(c.?)) {
+        stream.progress();
+        c = stream.current();
+    }
+}
+
+fn isWhiteSpace(character: u8) bool {
+    for (" \n\r\t") |c| {
+        if (c == character) {
+            return true;
         }
-        return false;
+    }
+    return false;
+}
+
+test "parse string" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var stream = CharacterStream.init("\"Who is this gentleman?\"");
+    const value = try parseString(&stream, allocator);
+    try std.testing.expectEqualStrings("Who is this gentleman?", value.string);
+}
+
+fn parseString(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecodeError!Value {
+    const start = stream.current();
+    if (start == null or start.? != '"') {
+        return JsonDecodeError.InvalidFormat;
     }
 
-    fn consume_whitespace(iter: *CharacterIterator) void {
-        var c = iter.current() catch iter.next();
-        while (true) {
-            if (c == null or !is_whitespace(c.?)) {
-                break;
+    var string = std.ArrayList(u8).init(allocator);
+
+    while (true) {
+        stream.progress();
+
+        if (stream.current()) |c| {
+            if (c == '"') {
+                stream.progress();
+                return Value{ .string = string.items };
             }
-            c = iter.next();
-        }
-    }
 
-    fn parse_value(iter: *CharacterIterator, allocator: std.mem.Allocator) JsonDecodeError!*Json {
-        consume_whitespace(iter);
-
-        const first_non_whitespace = iter.current() catch unreachable;
-        if (first_non_whitespace == null) {
+            try string.append(c);
+        } else {
             return JsonDecodeError.InvalidFormat;
         }
+    }
+}
 
-        var value: Json = val: {
-            switch (first_non_whitespace.?) {
-                '{' => {
-                    std.debug.print("object\n", .{});
-                    break :val Json{ .object = try parse_object(iter, allocator) };
+test "parse number" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var stream = CharacterStream.init("-1.1231E2");
+    const value = try parseNumber(&stream, allocator);
+    try std.testing.expectEqual(-1.1231e2, value.number);
+}
+
+fn parseNumber(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecodeError!Value {
+    var number_string = std.ArrayList(u8).init(allocator);
+    defer number_string.deinit();
+
+    var c: ?u8 = stream.current();
+    while (c != null and isJsonNumberCharacter(c.?)) {
+        try number_string.append(c.?);
+        stream.progress();
+        c = stream.current();
+    }
+
+    const number = std.fmt.parseFloat(f64, number_string.items) catch JsonDecodeError.InvalidFormat;
+    return Value{ .number = try number };
+}
+
+fn isJsonNumberCharacter(character: u8) bool {
+    return switch (character) {
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '-', 'e', 'E', '.' => true,
+        else => false,
+    };
+}
+
+test "parse object" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var stream = CharacterStream.init("{   \n     \"name\":      \"Sherlock Holmes\" \t  }");
+    const value = try parseObject(&stream, allocator);
+    try std.testing.expectEqualStrings("Sherlock Holmes", value.object.get("name").?.string);
+}
+
+fn parseObject(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecodeError!Value {
+    const start = stream.current();
+    if (start == null or start.? != '{') {
+        return JsonDecodeError.InvalidFormat;
+    }
+
+    var object = std.StringHashMap(Value).init(allocator);
+
+    stream.progress();
+    consumeWhitespace(stream);
+
+    if (stream.current()) |c| {
+        if (c == '}') {
+            stream.progress();
+            return Value{ .object = object };
+        }
+    } else {
+        return JsonDecodeError.InvalidFormat;
+    }
+
+    while (true) {
+        const key = try parseString(stream, allocator);
+
+        consumeWhitespace(stream);
+
+        const separator = stream.current();
+        if (separator == null or separator.? != ':') {
+            return JsonDecodeError.InvalidFormat;
+        }
+        stream.progress();
+
+        const value = try parseValue(stream, allocator);
+        try object.put(key.string, value);
+
+        if (stream.current()) |key_value_end| {
+            switch (key_value_end) {
+                '}' => {
+                    stream.progress();
+                    return Value{ .object = object };
                 },
-                '[' => {
-                    std.debug.print("array\n", .{});
-                    break :val Json{ .array = try parse_array(iter, allocator) };
-                },
-                '"' => {
-                    std.debug.print("string\n", .{});
-                    break :val Json{ .string = try parse_string(iter, allocator) };
-                },
-                't' => {
-                    std.debug.print("boolean\n", .{});
-                    try confirm(iter, "true");
-                    break :val Json{ .boolean = true };
-                },
-                'f' => {
-                    std.debug.print("boolean\n", .{});
-                    try confirm(iter, "false");
-                    break :val Json{ .boolean = false };
-                },
-                'n' => {
-                    std.debug.print("null\n", .{});
-                    try confirm(iter, "null");
-                    break :val Json{ .null = {} };
+                ',' => {
+                    stream.progress();
                 },
                 else => {
-                    break :val Json{ .number = try parse_number(iter, allocator) };
+                    return JsonDecodeError.InvalidFormat;
                 },
             }
-        };
-
-        consume_whitespace(iter);
-
-        switch (value) {
-            .array => |a| {
-                std.debug.print("{d}\n", .{a.items.len});
-            },
-            else => {},
-        }
-
-        return &value;
-    }
-
-    fn parse_string(iter: *CharacterIterator, allocator: std.mem.Allocator) JsonDecodeError!*std.ArrayList(u8) {
-        const start = iter.current() catch unreachable;
-        if (start == null or start.? != '"') {
+        } else {
             return JsonDecodeError.InvalidFormat;
         }
 
-        var string = std.ArrayList(u8).init(allocator);
+        consumeWhitespace(stream);
+    }
+}
 
-        while (true) {
-            if (iter.next()) |c| {
-                if (c == '"') {
-                    break;
-                }
+test "parse array" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
-                try string.append(c);
-            } else {
-                return JsonDecodeError.InvalidFormat;
-            }
-        }
+    var stream = CharacterStream.init("[ \"this is not a number\",    \n\t    3.1415926535          ]");
+    const value = try parseArray(&stream, allocator);
 
-        _ = iter.next();
-        return &string;
+    try std.testing.expectEqualStrings("this is not a number", value.array.items[0].string);
+    try std.testing.expectEqual(3.1415926535, value.array.items[1].number);
+}
+
+fn parseArray(stream: *CharacterStream, allocator: std.mem.Allocator) JsonDecodeError!Value {
+    const start = stream.current();
+    if (start == null or start.? != '[') {
+        return JsonDecodeError.InvalidFormat;
     }
 
-    fn parse_number(iter: *CharacterIterator, allocator: std.mem.Allocator) JsonDecodeError!f64 {
-        var string = std.ArrayList(u8).init(allocator);
+    var array = std.ArrayList(Value).init(allocator);
 
-        var c: ?u8 = iter.current() catch unreachable;
-        while (c != null and (('0' <= c.? and c.? <= '9') or c.? == '+' or c.? == '-' or c.? == 'e' or c.? == 'E' or c.? == '.')) {
-            try string.append(c.?);
-            c = iter.next();
+    stream.progress();
+    consumeWhitespace(stream);
+
+    if (stream.current()) |c| {
+        if (c == ']') {
+            stream.progress();
+            return Value{ .array = array };
         }
-
-        std.debug.print("number: {s}\n", .{string.items});
-
-        const result: JsonDecodeError!f64 = std.fmt.parseFloat(f64, string.items) catch JsonDecodeError.InvalidFormat;
-        return result;
+    } else {
+        return JsonDecodeError.InvalidFormat;
     }
 
-    fn parse_object(iter: *CharacterIterator, allocator: std.mem.Allocator) JsonDecodeError!*Json.Object() {
-        const start = iter.current() catch unreachable;
-        if (start == null or start.? != '{') {
-            return JsonDecodeError.InvalidFormat;
-        }
-        _ = iter.next();
+    while (true) {
+        const value = try parseValue(stream, allocator);
 
-        var object = Json.Object().init(allocator);
+        try array.append(value);
 
-        consume_whitespace(iter);
-        const first_non_whitespace = iter.current() catch unreachable;
-        if (first_non_whitespace == null) {
-            return JsonDecodeError.InvalidFormat;
-        } else if (first_non_whitespace.? == '}') {
-            _ = iter.next();
-
-            return &object;
-        }
-
-        while (true) {
-            const key = try parse_string(iter, allocator);
-
-            consume_whitespace(iter);
-            const key_value_separator = iter.current() catch unreachable;
-            if (key_value_separator == null or key_value_separator.? != ':') {
-                return JsonDecodeError.InvalidFormat;
-            }
-            _ = iter.next();
-
-            const value = try parse_value(iter, allocator);
-            try object.put(key.items, value);
-
-            if (iter.current() catch unreachable) |key_value_end| {
-                if (key_value_end == '}') {
-                    _ = iter.next();
-                    return &object;
-                } else if (key_value_end != ',') {
+        if (stream.current()) |key_value_end| {
+            switch (key_value_end) {
+                ']' => {
+                    stream.progress();
+                    return Value{ .array = array };
+                },
+                ',' => {
+                    stream.progress();
+                },
+                else => {
                     return JsonDecodeError.InvalidFormat;
-                }
-            } else {
-                return JsonDecodeError.InvalidFormat;
+                },
             }
-            _ = iter.next();
-
-            consume_whitespace(iter);
-        }
-    }
-
-    fn parse_array(iter: *CharacterIterator, allocator: std.mem.Allocator) JsonDecodeError!*std.ArrayList(*Json) {
-        const start = iter.current() catch unreachable;
-        if (start == null or start.? != '[') {
+        } else {
             return JsonDecodeError.InvalidFormat;
         }
-        _ = iter.next();
+    }
+}
 
-        var array = std.ArrayList(*Json).init(allocator);
+test "consume and match" {
+    var stream = CharacterStream.init("true or false");
+    try consumeAndMatch(&stream, "true");
+}
 
-        consume_whitespace(iter);
-        const first_non_whitespace = iter.current() catch unreachable;
-        if (first_non_whitespace == null) {
+fn consumeAndMatch(stream: *CharacterStream, slice: []const u8) JsonDecodeError!void {
+    for (slice) |c2| {
+        const c1 = stream.current();
+        if (c1 == null or c1.? != c2) {
             return JsonDecodeError.InvalidFormat;
-        } else if (first_non_whitespace.? == ']') {
-            _ = iter.next();
-            return &array;
         }
-
-        while (true) {
-            const value = try parse_value(iter, allocator);
-
-            try array.append(value);
-
-            if (iter.current() catch unreachable) |value_end| {
-                if (value_end == ']') {
-                    _ = iter.next();
-                    return &array;
-                } else if (value_end != ',') {
-                    return JsonDecodeError.InvalidFormat;
-                }
-            } else {
-                return JsonDecodeError.InvalidFormat;
-            }
-            _ = iter.next();
-        }
+        stream.progress();
     }
+}
 
-    /// Confirms whether the iterator's next values match the provided slice.
-    /// It iterates over the slice while also taking the iterator's next character always and checks that they are equal.
-    fn confirm(iter: *CharacterIterator, slice: []const u8) JsonDecodeError!void {
-        var c: ?u8 = iter.current() catch unreachable;
-        for (slice) |e| {
-            if (c == null or e != c.?) {
-                return JsonDecodeError.InvalidFormat;
-            }
-            c = iter.next();
-        }
-    }
-};
+fn parseTrue(stream: *CharacterStream) JsonDecodeError!Value {
+    try consumeAndMatch(stream, "true");
+    return Value{ .bool = true };
+}
+
+fn parseFalse(stream: *CharacterStream) JsonDecodeError!Value {
+    try consumeAndMatch(stream, "false");
+    return Value{ .bool = false };
+}
+
+fn parseNull(stream: *CharacterStream) JsonDecodeError!Value {
+    try consumeAndMatch(stream, "null");
+    return Value{ .null = {} };
+}
