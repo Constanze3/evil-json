@@ -32,10 +32,12 @@ pub fn main() !void {
     const data = try file.readToEndAlloc(allocator, file_size);
 
     const parsed = try json.decodeJson(data, allocator);
+
     const value = parsed.value;
 
-    var access = json.Access.init(value, allocator);
+    std.debug.print("{s}", .{parsed.value.object.get("gods").?.array.items[0].object.get("honorific name").?.string});
 
+    var access = json.Access.init(value, allocator);
     const result = try access.o("gods").a(0).o("honorific name").get_string();
     std.debug.print("{s}\n", .{result});
 }

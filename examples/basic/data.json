@@ -15,8 +15,8 @@
 
             "name": "The Fool",
             "honorific name": "The Fool that doesn't belong to this era; The Mysterious Ruler above the gray fog; The King of Yellow and Black who wields good luck.",
-            "health": true,
-            "strength": true,
+            "health": 10,
+            "strength": 12,
             "inventory": [
                 "Sun Brooch"
             ]

@@ -69,13 +69,20 @@ pub const Value = union(enum) {
     }
 };
 
+test "deinit Parsed" {
+    const data = "[12, 23, 33]";
+    const parsed = try decodeJson(data, std.testing.allocator);
+    parsed.deinit();
+}
+
 pub const Parsed = struct {
     value: Value,
-    allocator: std.mem.Allocator,
+    arena: *std.heap.ArenaAllocator,
 
     pub fn deinit(self: @This()) void {
-        _ = self;
-        // TODO
+        const allocator = self.arena.child_allocator;
+        self.arena.deinit();
+        allocator.destroy(self.arena);
     }
 };
 
@@ -93,14 +100,27 @@ test "decode json simple" {
 
 const JsonDecodeError = error{ InvalidFormat, OutOfMemory };
 
+/// Decodes a JSON slice.
+/// It wraps all allocations with an arena allocator for convinient freeing, if that is not needed use `decodeJsonValue` instead.
 pub fn decodeJson(data: []const u8, allocator: std.mem.Allocator) JsonDecodeError!Parsed {
-    var stream = CharacterStream.init(data);
-    const value = try parseValue(&stream, allocator);
-
-    return Parsed{
-        .value = value,
-        .allocator = allocator,
+    var parsed = Parsed{
+        .arena = try allocator.create(std.heap.ArenaAllocator),
+        .value = undefined,
     };
+    errdefer allocator.destroy(parsed.arena);
+
+    parsed.arena.* = std.heap.ArenaAllocator.init(allocator);
+    errdefer parsed.arena.deinit();
+
+    parsed.value = try decodeJsonValue(data, parsed.arena.allocator());
+
+    return parsed;
+}
+
+/// Decodes a JSON slice.
+pub fn decodeJsonValue(data: []const u8, allocator: std.mem.Allocator) JsonDecodeError!Parsed {
+    var stream = CharacterStream.init(data);
+    return try parseValue(&stream, allocator);
 }
 
 test "character stream" {
