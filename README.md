@@ -11,21 +11,18 @@ A simple JSON decoding/encoding library.
 
 ## Installation
 
-My recommendation: Don't use it. (Okay, maybe for fun...)
+**My recommendation: Don't use it. (Okay, maybe for fun...)**
 
-**Using the package manager:**
-
-Run this command in the project's directory:
+Run this command in the project's directory.
 ```
 zig fetch --save https://github.com/Constanze3/evil-json/archive/refs/tags/v0.0.1.tar.gz
 ```
 
 <details>
 <summary>
-Or add it manually to <code>build.zig.zon</code>:
+Or add it manually to <code>build.zig.zon</code>
 </summary>
 <br>
-
 ```zig
 .{
     .name = "app",
@@ -38,7 +35,6 @@ Or add it manually to <code>build.zig.zon</code>:
     },
 }
 ```
-
 </details>
 
 Then update <code>build.zig</code> with the following:
@@ -50,7 +46,7 @@ const evil_json_module = b.dependency("evil-json", .{
 
 exe.root_module.addImport("evil-json", evil_json_module);
 ```
-(Replace exe with the executable you would like to add the module to.)
+(replace exe with the executable you would like to add the module to)
 
 And finally you can import it:
 ```zig
