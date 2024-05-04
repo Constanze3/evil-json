@@ -21,7 +21,7 @@ Example build.zig.zon file
     .name = "app",
     .version = "0.0.0",
     .dependencies = .{
-        .evil-json = .{
+        .evil_json = .{
             .url = "TODO",
         },
     },
@@ -44,6 +44,6 @@ The basic example:
 TODO paste example here
 ```
 
-## Possbile future plans
+## Potential future plans
 - Add options to stringify (such as pretty printing)
 - Parse into any struct instead of just Value (just like std)
