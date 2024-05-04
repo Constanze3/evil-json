@@ -23,6 +23,7 @@ zig fetch --save https://github.com/Constanze3/evil-json/archive/refs/tags/v0.0.
 Or add it manually to <code>build.zig.zon</code>
 </summary>
 <br>
+
 ```zig
 .{
     .name = "app",
@@ -35,6 +36,7 @@ Or add it manually to <code>build.zig.zon</code>
     },
 }
 ```
+
 </details>
 
 Then update <code>build.zig</code> with the following:
