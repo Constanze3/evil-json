@@ -21,21 +21,21 @@ test "json access" {
 
     const value = Value{ .object = object };
 
-    var access = JsonAccess.init(value, allocator);
+    var access = Access.init(value, allocator);
     const string = try access.o("numbers").a(1).get_string();
     try std.testing.expectEqualSlices(u8, "Two", string);
 
-    var access2 = JsonAccess.init(value, allocator);
+    var access2 = Access.init(value, allocator);
     var err_index: usize = undefined;
     _ = access2.o("numbers").o("he").get_with_errinfo(&err_index) catch |err| {
-        try std.testing.expectEqual(JsonAccess.Error.InvalidKeyType, err);
+        try std.testing.expectEqual(Access.Error.InvalidKeyType, err);
         try std.testing.expectEqual(1, err_index);
     };
 }
 
 /// Struct that provides an easy way to access child JSON values of a JSON value.
 /// Use it only for convenience.
-pub const JsonAccess = struct {
+pub const Access = struct {
     target: Value,
     key_sequence: ArrayList(Key),
     out_of_memory: bool,
@@ -147,39 +147,26 @@ pub const JsonAccess = struct {
         return current;
     }
 
-    /// Evaluates the access sequence.
+    /// Evaluates the access sequence and returns the resulting value.
     pub fn get(self: @This()) Error!Value {
         var err_index: usize = undefined;
         return self.get_with_errinfo(&err_index);
     }
 
-    /// Evaluates the access sequence and returns the result as a string value.
-    /// It should be certain that the obtained value is a string, if it is not, switch on get() instead.
-    pub fn get_string(self: @This()) Error![]const u8 {
-        return (try self.get()).string;
+    /// Evaluates the access sequence and returns the resulting value.
+    /// Also deinitializes the access.
+    pub fn get_and_deinit(self: *@This()) Error!Value {
+        const value = self.get();
+        self.deinit();
+        return value;
     }
 
-    /// Evaulates the access sequence and returns the result as a number value.
-    /// It should be certain that the obtained value is a number, if it is not, switch on get() instead.
-    pub fn get_number(self: @This()) Error!f64 {
-        return (try self.get()).number;
-    }
-
-    /// Evaluates the access sequence and returns the result as an json.Object value.
-    /// It should be certain that the obtained value is an object, if it is not, switch on get() instead.
-    pub fn get_object(self: @This()) Error!json.Object {
-        return (try self.get()).object;
-    }
-
-    /// Evaluates the access sequence and returns the result as a json.Array value.
-    /// It should be certain that the obtained value is an array, if it is not, switch on get() instead.
-    pub fn get_array(self: @This()) Error!json.Array {
-        return (try self.get()).array;
-    }
-
-    /// Evaluates the access sequence and returns the result as a bool value.
-    /// It should be certain that the obtained value is a boolean, if it is not, switch on get() instead.
-    pub fn get_boolean(self: @This()) Error!bool {
-        return (try self.get()).bool;
+    // Creates a copy of this access using the same allocator.
+    pub fn clone(self: @This()) Allocator.Error!@This() {
+        return @This(){
+            .target = self.target,
+            .key_sequence = try self.key_sequence.clone(),
+            .out_of_memory = self.out_of_memory,
+        };
     }
 };

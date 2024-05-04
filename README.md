@@ -46,4 +46,5 @@ TODO paste example here
 
 ## Potential future plans
 - Add options to stringify (such as pretty printing)
+- Provide a way to scan files into JSON instead of just slices
 - Parse into any struct instead of just Value (just like std)
