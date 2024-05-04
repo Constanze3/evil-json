@@ -3,7 +3,7 @@
 A simple JSON decoding/encoding library.
 
 ## What can it do?
-- Parse most\* JSON files (into a Value datatype provided by the library)
+- Parse most\* JSON strings (into a Value datatype provided by the library)
 - Nicely access child values in a nested JSON Value
 - Stringify Values into minimal JSON strings
 
