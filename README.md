@@ -7,7 +7,7 @@ A simple JSON decoding/encoding library.
 - Nicely access child values in a nested JSON Value
 - Stringify Values into minimal JSON strings
 
-\*: The library is not tailored to any specific standard thoguh it mostly follows the basic JSON standard (ECMA-404).
+\*: The library is not tailored to any specific standard though it mostly follows the basic JSON standard (ECMA-404).
 
 ## Usage
 
@@ -36,7 +36,7 @@ zig build example -Dexample=<EXAMPLE NAME HERE>
 ```
 
 The available examples are:
-- basic : reads data from a file into a string and parses it
+- basic : read data from a file into a string and parse it
 - trivia : simple trivia game using Open Trivia DB (TODO)
 
 The basic example:
