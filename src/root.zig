@@ -44,15 +44,16 @@ pub const Parsed = struct {
         return self.accessUnmanaged(self.arena.allocator());
     }
 
-    /// Returns a JSON Access from the Json value of this struct.
+    /// Returns a JSON Access from the JSON value of this struct.
     pub fn accessUnmanaged(self: @This(), allocator: Allocator) Access {
         return Access.init(self.value, allocator);
     }
 };
 
 test {
-    _ = @import("access.zig");
+    _ = @import("parse.zig");
     _ = @import("stringify.zig");
+    _ = @import("access.zig");
 }
 
 test "stringify" {

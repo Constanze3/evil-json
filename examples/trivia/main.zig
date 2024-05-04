@@ -73,39 +73,42 @@ const Trivia = struct {
     incorrect_answers: [3][]const u8,
 };
 
-// This is where the evil-json magic happens
+// This is where the evil-json magic happens.
 fn getNextTrivia(allocator: Allocator) !Trivia {
-    // Here we get the question, answer and some incorrect answers through an http request
-    // data is a []const u8 containing JSON as text
+    // Here we get the question, answer and some incorrect answers through an http request.
+    // data is a []const u8 containing JSON as text.
     const data = try requestHistoryQuestion(allocator);
 
-    // This parses the data into a Parsed struct.
+    // This parses the data into a Parsed struct..
     const parsed = try json.parse(data, allocator);
 
-    // We create an Access from the parsed data, it uses the same allocator that parsed was allocated with
-    // accessUnmanaged() is also available if we want a custom allocator
-    // or using Access.init(...) passing both the value and allocator is also an option
+    // We create a json.Access from the parsed data, it uses the same allocator that parsed was allocated with.
+    // accessUnmanaged() is also available if we want a custom allocator.
+    // Or we could also use Access.init(...) passing both the value and allocator.
     var a = parsed.access();
+
+    // We want to drop this access after the end of the scope.
+    // This is necessary because we won't use get_and_deinit() on this access.
     defer a.deinit();
 
-    // We progress the access selecting the value with key "result" in the data
-    // and then selecting the first thing. Open Trivia DB can return multiple questions,
-    // but we only request one in this example.
+    // We progress the access by selecting the value with key "results" and then selecting the
+    // item at index 0. Open Trivia DB can return multiple questions, but we only request
+    // one in this example.
     _ = a.o("results").a(0);
 
-    // We clone the access here which allows us to keep our "progress" in a, while progressing further
-    // on a1 to get the question.
+    // We clone the access here which allows us to keep our "progress" in a, while progressing
+    // further on a1 to get the value at the "question" key.
     //
-    // There are two methods get() and get_and_deinit() which one can use to evaluate an
-    // access (obtain the actual json value)
+    // There are two methods get() and get_and_deinit() that one can use to evaluate an
+    // access (obtain the actual JSON value).
     var a1 = try a.clone();
     const question = (try a1.o("question").get_and_deinit()).string;
 
-    // Again we clone a and progress further down the json object to get the correct answer.
+    // Again we clone a and progress down the JSON object to get the value at the "correct answer" key.
     var a2 = try a.clone();
     const correct_answer = (try a2.o("correct_answer").get_and_deinit()).string;
 
-    // We get the incorrect answers similarily as above, array here is an std.ArrayList(Value)
+    // We get the values at "incorrect answers" similarily as the other two above, "array" here is an std.ArrayList(Value).
     var a3 = try a.clone();
     const incorrect_answers_array = (try a3.o("incorrect_answers").get_and_deinit()).array;
 

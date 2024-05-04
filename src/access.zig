@@ -147,14 +147,14 @@ pub const Access = struct {
         return current;
     }
 
-    /// Evaluates the access sequence and returns the resulting value.
+    /// Evaluates the key sequence and returns the resulting value.
     pub fn get(self: @This()) Error!Value {
         var err_index: usize = undefined;
         return self.get_with_errinfo(&err_index);
     }
 
-    /// Evaluates the access sequence and returns the resulting value.
-    /// Also deinitializes the access.
+    /// Evaluates the key sequence and returns the resulting value.
+    /// Also deinits the access.
     pub fn get_and_deinit(self: *@This()) Error!Value {
         const value = self.get();
         self.deinit();
