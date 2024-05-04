@@ -5,20 +5,6 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const HashMap = std.HashMap;
 
-const Util = struct {
-    allocator: Allocator,
-
-    fn string(self: *const Util, slice: []const u8) Allocator.Error!ArrayList(u8) {
-        var str = ArrayList(u8).init(self.allocator);
-        try str.appendSlice(slice);
-        return str;
-    }
-
-    fn list(self: *const Util, comptime T: type) ArrayList(T) {
-        return ArrayList(T).init(self.allocator);
-    }
-};
-
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
