@@ -78,6 +78,7 @@ fn getNextTrivia(allocator: Allocator) !Trivia {
     // Here we get the question, answer and some incorrect answers through an http request.
     // data is a []const u8 containing JSON as text.
     const data = try requestHistoryQuestion(allocator);
+    defer allocator.free(data);
 
     // This parses the data into a Parsed struct..
     const parsed = try json.parse(data, allocator);
