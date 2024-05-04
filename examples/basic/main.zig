@@ -31,7 +31,7 @@ pub fn main() !void {
     const file_size = try file.getEndPos();
     const data = try file.readToEndAlloc(allocator, file_size);
 
-    const parsed = try json.decodeJson(data, allocator);
+    const parsed = try json.parse(data, allocator);
 
     const value = parsed.value;
 
