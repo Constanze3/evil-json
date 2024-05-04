@@ -22,7 +22,7 @@ test "parse json simple" {
 
 const JsonDecodeError = error{ InvalidFormat, OutOfMemory };
 
-/// Decodes a JSON slice.
+/// Parses a JSON slice.
 /// It wraps all allocations with an arena allocator for convinient freeing.
 pub fn parse(data: []const u8, allocator: Allocator) JsonDecodeError!Parsed {
     var parsed = Parsed{

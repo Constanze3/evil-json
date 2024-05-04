@@ -9,11 +9,11 @@ A simple JSON decoding/encoding library.
 
 \*: The library is not tailored to any specific standard though it mostly follows the basic JSON standard (ECMA-404).
 
-## Usage
+## Installation
 
 My recommendation: Don't use it. (Okay, maybe for fun...)
 
-**Using the package manager**
+**Using the package manager:**
 
 Example build.zig.zon file
 ```zig
@@ -37,7 +37,7 @@ zig build example -Dexample=<EXAMPLE NAME HERE>
 
 The available examples are:
 - basic : read data from a file into a string and parse it
-- trivia : simple trivia game using Open Trivia DB (TODO)
+- trivia : simple trivia game using Open Trivia DB
 
 The basic example:
 ```zig
