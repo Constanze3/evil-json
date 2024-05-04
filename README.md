@@ -15,17 +15,46 @@ My recommendation: Don't use it. (Okay, maybe for fun...)
 
 **Using the package manager:**
 
-Example build.zig.zon file
+Run this command in the project's directory:
+```
+zig fetch --save https://github.com/Constanze3/evil-json/archive/refs/tags/v0.0.1.tar.gz
+```
+
+<details>
+<summary>
+Or add it manually to <code>build.zig.zon</code>:
+</summary>
+<br>
+
 ```zig
 .{
     .name = "app",
     .version = "0.0.0",
     .dependencies = .{
-        .evil_json = .{
-            .url = "TODO",
+        .@"evil-json" = .{
+            .url = "https://github.com/Constanze3/evil-json/archive/refs/tags/v0.0.1.tar.gz",
+            .hash = "122087e4c7cbc7852de86c575a1197c5d619dc75123efd89796eb746af43bffb1145",
         },
     },
 }
+```
+
+</details>
+
+Then update <code>build.zig</code> with the following:
+```zig
+const evil_json_module = b.dependency("evil-json", .{
+    .target = target,
+    .optimize = optimize,
+}).module("evil-json");
+
+exe.root_module.addImport("evil-json", evil_json_module);
+```
+(Replace exe with the executable you would like to add the module to.)
+
+And finally you can import it:
+```zig
+const json = @import("evil-json");
 ```
 
 ## Examples
